@@ -10,7 +10,7 @@ vehicle_id = 'vehicle.tesla.model3'
 town_id = 'Town03'
 res = 500
 car_colour = (124, 124, 124)  # BGR format
-diff_colour = (124, 14, 14)  # BGR format
+diff_colour = (124, 14, 14)   # BGR format
 sampleSize = 3
 
 
@@ -21,10 +21,57 @@ def setEnvironment(transforms):
     handler.update_distance(distance)
     handler.update_pitch(pitch)
     handler.update_yaw(yaw)
+    
+    # Lighting
     handler.update_sun_altitude_angle(sun_altitude)
     handler.update_sun_azimuth_angle(sun_azimuth)
-    handler.world_tick(100)
-    time.sleep(0.1)
+    
+    # FORCE STATIC WEATHER (Crucial for differential rendering)
+    # If clouds/wind move between the two photos, the background will 'change' 
+    # and ruin the mask.
+    handler.update_cloudiness(0.0)
+    handler.update_wind_intensity(0.0)
+    handler.update_precipitation(0.0)
+    handler.update_fog_density(0.0)
+    
+    # Tick to apply weather
+    handler.world_tick(10)
+
+
+def process_car_mask(mask, min_pixels=100):
+    """
+    Cleans the mask by keeping only the largest object (the main car).
+    Removes tiny blobs/noise that cause 'multiple vehicles' errors.
+    Returns: (is_valid, cleaned_mask)
+    """
+    # Ensure mask is uint8 (0-255)
+    if mask.dtype == bool:
+        mask = mask.astype(np.uint8) * 255
+    
+    # Find connected components
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    
+    # num_labels includes background (0). So we need at least 2 labels (bg + 1 object)
+    if num_labels < 2:
+        return False, mask 
+
+    # Sort components by Area (column 4) in descending order.
+    # We skip index 0 because that is the background.
+    # argsort returns indices of the sorted array, so we adjust +1 to match original labels.
+    component_indices = np.argsort(stats[1:, 4])[::-1] + 1
+    
+    # The largest blob (candidate for the car)
+    largest_label = component_indices[0]
+    largest_area = stats[largest_label, 4]
+
+    # Safety check: Is the largest thing actually a car-sized object?
+    if largest_area < min_pixels:
+        return False, mask # Largest thing is just a speck of noise
+    
+    # Create a new mask keeping ONLY the largest component
+    cleaned_mask = (labels == largest_label).astype(np.uint8) * 255
+    
+    return True, cleaned_mask
 
 
 def main():
@@ -41,7 +88,7 @@ def main():
 
     while sample_n < sampleSize:
         try:
-            #generate a random camera/environment setup
+            # 1. Randomize Environment
             spawnPoint = random.randint(1, n_spawn_points-1)
             distance = random.randint(5, 10)
             pitch = random.randint(0, 60)
@@ -52,88 +99,86 @@ def main():
             transforms = (handler, spawnPoint, distance, pitch, yaw, sun_altitude, sun_azimuth)
             setEnvironment(transforms)
 
-            # set car colour & get image
+            # --- STEP 2: REFERENCE IMAGE (GREY) ---
             handler.change_vehicle_color(car_colour)
-            handler.world_tick(100)
-            time.sleep(0.1)
-            ref_image = handler.get_image()  # BGR format
+            
+            # CRITICAL: Wait for car to fall and settle.
+            # Since change_vehicle_color respawns the car, it falls from slight height.
+            # If we don't wait enough, the car will be in different positions in the two photos.
+            handler.world_tick(50) 
+            time.sleep(0.05)
+            
+            ref_image = handler.get_image()  # BGR format (500, 500, 3)
 
 
-            # Generate vehicle mask
-            seg_image = handler.get_segmentation()  # BGR format
-            # Create vehicle mask (blue pixels in segmentation)
-            vehicle_mask = (seg_image[:,:,0] == 255) & \
-                        (seg_image[:,:,1] == 0) & \
-                        (seg_image[:,:,2] == 0)
-            # Validate vehicle mask
-            if not validate_car_mask(vehicle_mask):
-                print(f"⚠️ Sample {sample_n}: Invalid mask (multiple cars or no car detected)")
+            # --- STEP 3: SEGMENTATION MASK ---
+            seg_image = handler.get_segmentation()
+            
+            # Create raw mask (blue pixels)
+            raw_mask = (seg_image[:,:,0] == 255) & \
+                       (seg_image[:,:,1] == 0) & \
+                       (seg_image[:,:,2] == 0)
+            
+            # Clean and Validate mask (Fixes "Multiple Vehicles" and "Tiny Blob" errors)
+            is_valid, vehicle_mask = process_car_mask(raw_mask)
+
+            if not is_valid:
+                print(f"⚠️ Sample {sample_n}: Invalid mask (no distinct car detected)")
                 continue
 
 
-            # change car colour & get image
+            # --- STEP 4: DIFFERENTIAL IMAGE (RED) ---
             handler.change_vehicle_color(diff_colour)
-            handler.world_tick(100)
-            time.sleep(0.1)
-            # Get the actual rendered BGR image
+            
+            # Wait exactly the same amount for physics to settle
+            handler.world_tick(50)
+            time.sleep(0.05)
+            
             cross_ref_image = handler.get_image()  # BGR format
 
-            # get intersection of 2 car images and extract car pixels
-            intersection_mask = np.isclose(ref_image,cross_ref_image, atol=1e-2).all(axis=-1) # all pixels the same in both images (windows, env)
+            # --- STEP 5: FEATURE EXTRACTION ---
+            # Get intersection. 
+            # Increased atol=4 ensures minor JPEG/Render noise doesn't break the mask.
+            intersection_mask = np.isclose(ref_image, cross_ref_image, atol=4).all(axis=-1)
 
-            #apply vehicle mask to intersection mask to get just windows
+            # Apply vehicle mask to intersection to isolate windows/trim
+            # (We only care about intersection pixels INSIDE the car silhouette)
             feature_mask = np.zeros_like(intersection_mask)
-            feature_mask[vehicle_mask] = intersection_mask[vehicle_mask]
+            
+            # Convert mask to boolean for indexing
+            vehicle_mask_bool = vehicle_mask > 0
+            feature_mask[vehicle_mask_bool] = intersection_mask[vehicle_mask_bool]
 
-            # Overlay: only keep intersecting pixels in prediction
-            feature_overlay = np.where(feature_mask, ref_image, 0)
+            # --- FIX: BROADCASTING ERROR ---
+            # feature_mask is (500, 500). ref_image is (500, 500, 3).
+            # We add a dimension to make mask (500, 500, 1) so it broadcasts correctly.
+            feature_overlay = np.where(feature_mask[:, :, np.newaxis], ref_image, 0)
 
 
-
-            # store ref_image, transforms, vehicle_mask, feature_overlay
-            # Create a directory for this sample
+            # --- STEP 6: SAVE DATA ---
             out_dir = f"./output_samples/sample_{sample_n}"
             os.makedirs(out_dir, exist_ok=True)
 
-            # Save reference image
-            ref_image_path = os.path.join(out_dir, "ref_image.png")
-            cv2.imwrite(ref_image_path, ref_image)
+            cv2.imwrite(os.path.join(out_dir, "ref_image.png"), ref_image)
 
-            # Save transforms (camera/environment settings)
-            transforms_path = os.path.join(out_dir, "transforms.npy")
-            # Store as numpy array: [distance, pitch, yaw]
-            np.save(transforms_path, np.array([distance, pitch, yaw]))
+            # Save transforms [distance, pitch, yaw]
+            np.save(os.path.join(out_dir, "transforms.npy"), np.array([distance, pitch, yaw]))
 
-            # Save vehicle mask
-            vehicle_mask_path = os.path.join(out_dir, "vehicle_mask.png")
-            # Convert mask to uint8 for view/save (multiply by 255)
-            vehicle_mask_uint8 = (vehicle_mask.astype(np.uint8)) * 255
-            cv2.imwrite(vehicle_mask_path, vehicle_mask_uint8)
+            # Save vehicle mask (already uint8 0-255 from process_car_mask)
+            cv2.imwrite(os.path.join(out_dir, "vehicle_mask.png"), vehicle_mask)
 
-            # Save feature overlay
-            feature_overlay_path = os.path.join(out_dir, "feature_overlay.png")
-            cv2.imwrite(feature_overlay_path, feature_overlay)
+            # Save the invariant feature overlay
+            cv2.imwrite(os.path.join(out_dir, "feature_overlay.png"), feature_overlay)
 
             print(f"✅ Sample {sample_n}")
             sample_n += 1
 
         except Exception as e:
             print(f"Error generating sample {sample_n}: {e}")
+            # Optional: Print traceback to see line number of errors
+            # import traceback
+            # traceback.print_exc()
             continue
-
-
-def validate_car_mask(mask):
-    # Convert to uint8
-    if mask.dtype == bool:
-        mask = mask.astype(np.uint8) * 255
-    
-    # Find connected components
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
-    
-    # 1 label = no car
-    # 2 labels = 1 car
-    # >2 labels = multiple cars/objects
-    return num_labels == 2
 
 
 def initialize_carla():
@@ -156,7 +201,6 @@ def initialize_carla():
             print(f"Error initializing CARLA: {e}")
             print("Make sure CARLA simulator is running and ready on localhost:2000")
             raise
-
 
 
 if __name__ == '__main__':
