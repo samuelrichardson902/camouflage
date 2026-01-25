@@ -12,7 +12,7 @@ res = 500
 car_colour = (124, 124, 124)  # BGR format
 diff_colour = (124, 14, 14)   # BGR format
 sampleSize = 10
-output_root = "./dataset"
+output_root = "./sample_dataset"
 
 
 def setEnvironment(transforms):
