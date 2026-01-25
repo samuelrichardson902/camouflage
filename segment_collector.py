@@ -11,7 +11,7 @@ town_id = 'Town03'
 res = 500
 car_colour = (124, 124, 124)  # BGR format
 diff_colour = (124, 14, 14)   # BGR format
-sampleSize = 3
+sampleSize = 10
 
 
 def setEnvironment(transforms):
@@ -38,7 +38,7 @@ def setEnvironment(transforms):
     handler.world_tick(10)
 
 
-def process_car_mask(mask, min_pixels=100):
+def process_car_mask(mask, min_pixels=700):
     """
     Cleans the mask by keeping only the largest object (the main car).
     Removes tiny blobs/noise that cause 'multiple vehicles' errors.
