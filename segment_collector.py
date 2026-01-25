@@ -12,6 +12,7 @@ res = 500
 car_colour = (124, 124, 124)  # BGR format
 diff_colour = (124, 14, 14)   # BGR format
 sampleSize = 10
+output_root = "./dataset"
 
 
 def setEnvironment(transforms):
@@ -83,6 +84,12 @@ def main():
         print(f"Failed to initialize CARLA: {e}")
         print("Exiting...")
         return
+
+
+    os.makedirs(os.path.join(output_root, 'reference'), exist_ok=True)
+    os.makedirs(os.path.join(output_root, 'masks'), exist_ok=True)
+    os.makedirs(os.path.join(output_root, 'overlays'), exist_ok=True)
+    os.makedirs(os.path.join(output_root, 'transforms'), exist_ok=True)
     
     sample_n = 0
 
@@ -155,20 +162,18 @@ def main():
             feature_overlay = np.where(feature_mask[:, :, np.newaxis], ref_image, 0)
 
 
-            # --- STEP 6: SAVE DATA ---
-            out_dir = f"./output_samples/sample_{sample_n}"
-            os.makedirs(out_dir, exist_ok=True)
+            # --- CHANGED: SAVE DATA TO TYPE FOLDERS ---
+            # Save Reference Image
+            cv2.imwrite(f"{output_root}/reference/{sample_n}.png", ref_image)
 
-            cv2.imwrite(os.path.join(out_dir, "ref_image.png"), ref_image)
+            # Save Transforms (Metadata)
+            np.save(f"{output_root}/transforms/{sample_n}.npy", np.array([distance, pitch, yaw]))
 
-            # Save transforms [distance, pitch, yaw]
-            np.save(os.path.join(out_dir, "transforms.npy"), np.array([distance, pitch, yaw]))
+            # Save Mask
+            cv2.imwrite(f"{output_root}/masks/{sample_n}.png", vehicle_mask)
 
-            # Save vehicle mask (already uint8 0-255 from process_car_mask)
-            cv2.imwrite(os.path.join(out_dir, "vehicle_mask.png"), vehicle_mask)
-
-            # Save the invariant feature overlay
-            cv2.imwrite(os.path.join(out_dir, "feature_overlay.png"), feature_overlay)
+            # Save Feature Overlay
+            cv2.imwrite(f"{output_root}/overlays/{sample_n}.png", feature_overlay)
 
             print(f"✅ Sample {sample_n}")
             sample_n += 1
