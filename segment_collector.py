@@ -20,14 +20,14 @@ vehicle_ids = [
     'vehicle.tesla.model3', 
     'vehicle.audi.tt', 
     'vehicle.toyota.prius', 
-    'vehicle.mercedes.coupe_2020', 
-    'vehicle.seat.leon'
+    'vehicle.jeep.wrangler_rubicon', 
+    'vehicle.nissan.patrol'
 ]
 
-distances= [5,8,12] # camera distances
-pitches= [10,30,60] # camera height (degrees)
-yaw_step = 30 # degrees between shots 360/30=12 shots
-locations_per_car = 5 # how many different spawns to test each car
+distances= [5,7,10] # camera distances
+pitches= [10,30,45] # camera height (degrees)
+yaw_step = 15 # degrees between shots 360/15=24 shots
+locations_per_car = 25 # how many different spawns to test each car
 
 
 town_id = 'Town03'
@@ -127,13 +127,14 @@ def capture_sample(handler, save_idx, meta_data):
     feature_overlay = np.where(feature_mask[:, :, np.newaxis], ref_image, 0)
 
     # E. SAVE DATA
-    cv2.imwrite(f"{output_root}/reference/{save_idx}.png", ref_image)
-    cv2.imwrite(f"{output_root}/masks/{save_idx}.png", vehicle_mask)
-    cv2.imwrite(f"{output_root}/overlays/{save_idx}.png", feature_overlay)
+    filename = f"{save_idx:05d}.png"
+    cv2.imwrite(f"{output_root}/reference/{filename}", ref_image)
+    cv2.imwrite(f"{output_root}/masks/{filename}", vehicle_mask)
+    cv2.imwrite(f"{output_root}/overlays/{filename}", feature_overlay)
     
     # Save Metadata (Distance, Pitch, Yaw, VehicleName)
     # meta_data is [distance, pitch, yaw, vehicle_id_string]
-    np.save(f"{output_root}/transforms/{save_idx}.npy", np.array(meta_data))
+    np.save(f"{output_root}/transforms/{save_idx:05d}.npy", np.array(meta_data))
     
     return True
 
