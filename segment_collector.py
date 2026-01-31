@@ -21,14 +21,14 @@ vehicle_ids = [
     'vehicle.tesla.model3', 
     'vehicle.audi.tt', 
     'vehicle.toyota.prius', 
-    'vehicle.jeep.wrangler_rubicon', 
+    'vehicle.seat.leon', 
     'vehicle.nissan.patrol'
 ]
 
-distances= [5]#[5,7,10] # camera distances
-pitches= [30]#[10,30,45] # camera height (degrees)
-yaw_step = 60#15 # degrees between shots 360/15=24 shots
-locations_per_car = 2 #5 # how many different spawns to test each car
+distances= [5,7,10] # camera distances
+pitches= [10,30,45] # camera height (degrees)
+yaw_step =30 # degrees between shots 360/30=12 shots
+locations_per_car = 25 # how many different spawns to test each car
 
 
 town_id = 'Town03'
@@ -65,6 +65,7 @@ def set_camera(handler, distance, pitch, yaw):
     handler.update_pitch(pitch)
     handler.update_yaw(yaw)
     handler.world_tick(5)
+    time.sleep(0.02)
     
     
 

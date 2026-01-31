@@ -40,7 +40,7 @@ class CarlaHandler():
         camera_bp = self.blueprint_library.find('sensor.camera.rgb')
         camera_bp.set_attribute('image_size_x', str(self.x_res))
         camera_bp.set_attribute('image_size_y', str(self.y_res))
-        camera_bp.set_attribute('sensor_tick', '0.1')
+        camera_bp.set_attribute('sensor_tick', '0.0')
         self.camera = self.world.spawn_actor(
             camera_bp,
             carla.Transform(carla.Location(z=10)) # Spawn high up initially
@@ -52,7 +52,7 @@ class CarlaHandler():
         seg_bp = self.blueprint_library.find('sensor.camera.semantic_segmentation')
         seg_bp.set_attribute('image_size_x', str(self.x_res))
         seg_bp.set_attribute('image_size_y', str(self.y_res))
-        seg_bp.set_attribute('sensor_tick', '0.1')
+        seg_bp.set_attribute('sensor_tick', '0.0')
         self.seg_camera = self.world.spawn_actor(
             seg_bp,
             carla.Transform(carla.Location(z=10))
