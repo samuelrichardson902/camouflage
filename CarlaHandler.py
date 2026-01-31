@@ -36,27 +36,26 @@ class CarlaHandler():
         self.spectator = self.world.get_spectator()
         self.blueprint_library = self.world.get_blueprint_library()
 
-        # Add a camera sensor to the spectator
+        # RGB Camera
         camera_bp = self.blueprint_library.find('sensor.camera.rgb')
         camera_bp.set_attribute('image_size_x', str(self.x_res))
         camera_bp.set_attribute('image_size_y', str(self.y_res))
         camera_bp.set_attribute('sensor_tick', '0.1')
         self.camera = self.world.spawn_actor(
             camera_bp,
-            carla.Transform(carla.Location()),
-            attach_to=self.spectator
+            carla.Transform(carla.Location(z=10)) # Spawn high up initially
         )
         self.camera.listen(self.camera_callback)
 
-        # Add segmentation camera to the spectator
+
+        # Segmentation Camera
         seg_bp = self.blueprint_library.find('sensor.camera.semantic_segmentation')
         seg_bp.set_attribute('image_size_x', str(self.x_res))
         seg_bp.set_attribute('image_size_y', str(self.y_res))
         seg_bp.set_attribute('sensor_tick', '0.1')
         self.seg_camera = self.world.spawn_actor(
             seg_bp,
-            carla.Transform(carla.Location()),
-            attach_to=self.spectator
+            carla.Transform(carla.Location(z=10))
         )
         self.seg_camera.listen(self.seg_camera_callback)
 
@@ -103,8 +102,6 @@ class CarlaHandler():
                 self.camera.destroy()
             if self.seg_camera is not None:
                 self.seg_camera.destroy()
-            if self.spectator is not None:
-                self.spectator.destroy()
             self.world.apply_settings(carla.WorldSettings())  # Reset to default settings
         finally:
             print('Ending. . .')
@@ -144,7 +141,11 @@ class CarlaHandler():
             )
             camera_transform = carla.Transform(camera_pos, camera_rot)
 
-        self.spectator.set_transform(camera_transform)
+            if camera_transform:
+                self.spectator.set_transform(camera_transform) # Move user view
+                self.camera.set_transform(camera_transform)    # Move RGB camera
+                self.seg_camera.set_transform(camera_transform)# Move Seg camera
+
 
 
     def camera_callback(self, carla_image):
