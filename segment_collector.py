@@ -28,7 +28,7 @@ vehicle_ids = [
 distances= [5,7,10] # camera distances
 pitches= [10,30,45] # camera height (degrees)
 yaw_step =30 # degrees between shots 360/30=12 shots
-locations_per_car = 25 # how many different spawns to test each car
+locations_per_car = 45 # how many different spawns to test each car
 
 
 town_id = 'Town03'
