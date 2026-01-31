@@ -4,6 +4,7 @@ import time
 import random
 import os
 import sys
+from tqdm import tqdm
 
 # Try/Except to handle if you run this without the handler file present
 try:
@@ -14,7 +15,7 @@ except ImportError:
 
 
 # Configuration
-output_root = "./dataset_structured"
+output_root = "./sample_dataset"
 
 vehicle_ids = [
     'vehicle.tesla.model3', 
@@ -24,10 +25,10 @@ vehicle_ids = [
     'vehicle.nissan.patrol'
 ]
 
-distances= [5,7,10] # camera distances
-pitches= [10,30,45] # camera height (degrees)
-yaw_step = 15 # degrees between shots 360/15=24 shots
-locations_per_car = 25 # how many different spawns to test each car
+distances= [5]#[5,7,10] # camera distances
+pitches= [30]#[10,30,45] # camera height (degrees)
+yaw_step = 60#15 # degrees between shots 360/15=24 shots
+locations_per_car = 2 #5 # how many different spawns to test each car
 
 
 town_id = 'Town03'
@@ -43,14 +44,9 @@ def ensure_folders():
         os.makedirs(os.path.join(output_root, folder), exist_ok=True)
 
 
-def set_camera_and_lighting(handler, distance, pitch, yaw):
-    """Updates camera pose and randomizes lighting."""
-    handler.update_distance(distance)
-    handler.update_pitch(pitch)
-    handler.update_yaw(yaw)
-    
-    # Randomize lighting for every single shot to prevent overfitting to specific shadows
-    sun_alt = random.randint(15, 90)   # Avoid 0-15 (too dark/night)
+def randomize_lighting(handler):
+    """Randomize lighting for every position to prevent overfitting to specific shadows"""
+    sun_alt = random.randint(15, 90)
     sun_azi = random.randint(0, 360)
     
     handler.update_sun_altitude_angle(sun_alt)
@@ -61,6 +57,16 @@ def set_camera_and_lighting(handler, distance, pitch, yaw):
     handler.update_wind_intensity(0.0)
     handler.update_precipitation(0.0)
     handler.world_tick(5) # Tick to apply light changes
+
+
+def set_camera(handler, distance, pitch, yaw):
+    """Updates camera pose"""
+    handler.update_distance(distance)
+    handler.update_pitch(pitch)
+    handler.update_yaw(yaw)
+    handler.world_tick(5)
+    
+    
 
 
 def process_car_mask(mask, min_pixels=700):
@@ -140,7 +146,12 @@ def capture_sample(handler, save_idx, meta_data):
 
 def main():
     ensure_folders()
-    
+
+    shots_per_orbit = len(range(0,360,yaw_step))
+    total_samples = len(vehicle_ids) * locations_per_car * len(distances) * len(pitches) * shots_per_orbit
+    print(f"{total_samples} images to be collected")
+
+
     # 1. Initialize CARLA once
     try:
         # Note: We init with NO vehicle first, or destroy the default one immediately
@@ -154,55 +165,58 @@ def main():
 
     global_counter = 0
 
-    # --- OUTER LOOP: VEHICLES ---
-    for v_idx, vehicle_id in enumerate(vehicle_ids):
-        print(f"\n🚗 Starting collection for vehicle: {vehicle_id} ({v_idx+1}/{len(vehicle_ids)})")
-        
-        try:
-            # Clean up previous car and spawn new one
-            handler.destroy_all_vehicles()
-            handler.world_tick(10)
-            handler.spawn_vehicle(vehicle_id)
-            handler.update_view('3d')
-            time.sleep(1)
-        except Exception as e:
-            print(f"Skipping {vehicle_id} due to spawn error: {e}")
-            continue
+    with tqdm(total=total_samples, desc="Collecting Samples", unit="img") as pbar:
 
-        # --- LOOP: SPAWN LOCATIONS ---
-        # Pick 'locations_per_car' random spots to place the car
-        chosen_spawns = random.sample(range(n_spawn_points), min(locations_per_car, n_spawn_points))
-        
-        for spawn_point in chosen_spawns:
-            handler.change_spawn_point(spawn_point)
-            # Big tick to let car settle on the ground
-            handler.world_tick(50) 
+        # --- OUTER LOOP: VEHICLES ---
+        for v_idx, vehicle_id in enumerate(vehicle_ids):
             
-            # --- LOOP: ORBITING (Distance -> Pitch -> Yaw) ---
-            for dist in distances:
-                for pitch in pitches:
-                    # Generate Orbit Yaws (0, 30, 60 ... 330)
-                    orbit_yaws = range(0, 360, yaw_step)
-                    
-                    for yaw in orbit_yaws:
-                        try:
-                            # 1. Set Scene
-                            set_camera_and_lighting(handler, dist, pitch, yaw)
-                            
-                            # 2. Capture
-                            meta = [dist, pitch, yaw, vehicle_id]
-                            success = capture_sample(handler, global_counter, meta)
-                            
-                            if success:
-                                print(f"Sample {global_counter} | {vehicle_id} | D:{dist} P:{pitch} Y:{yaw}")
-                                global_counter += 1
-                            else:
-                                print(f"Sample {global_counter} Failed (Mask Issue)")
+            try:
+                # Clean up previous car and spawn new one
+                handler.destroy_all_vehicles()
+                handler.world_tick(10)
+                handler.spawn_vehicle(vehicle_id)
+                handler.update_view('3d')
+                time.sleep(1)
+            except Exception as e:
+                print(f"Skipping {vehicle_id} due to spawn error: {e}")
+                skipped = locations_per_car * len(distances) * len(pitches) * shots_per_orbit
+                pbar.update(skipped)
+                continue
+
+            # --- LOOP: SPAWN LOCATIONS ---
+            # Pick 'locations_per_car' random spots to place the car
+            chosen_spawns = random.sample(range(n_spawn_points), min(locations_per_car, n_spawn_points))
+            
+            for spawn_point in chosen_spawns:
+                handler.change_spawn_point(spawn_point)
+                randomize_lighting(handler)
+                # Big tick to let car settle on the ground
+                handler.world_tick(50) 
+                
+                # orbiting loop (Distance Pitch Yaw)
+                for dist in distances:
+                    for pitch in pitches:
+                        orbit_yaws = range(0, 360, yaw_step)
+                        
+                        for yaw in orbit_yaws:
+                            try:
+                                # 1. Set Scene
+                                set_camera(handler, dist, pitch, yaw)
                                 
-                        except Exception as e:
-                            print(f"Error on sample {global_counter}: {e}")
-                            # Try to recover by ticking
-                            handler.world_tick(10)
+                                # 2. Capture
+                                meta = [dist, pitch, yaw, vehicle_id]
+                                success = capture_sample(handler, global_counter, meta)
+                                
+                                if success:
+                                    global_counter += 1
+
+
+                                pbar.update(1)
+                                    
+                            except Exception as e:
+                                # Try to recover by ticking
+                                handler.world_tick(10)
+                                pbar.update(1)
 
     print(f"\n✅ Data collection complete. Total samples: {global_counter}")
     handler.destroy_all_vehicles()

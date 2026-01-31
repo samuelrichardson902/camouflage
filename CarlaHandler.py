@@ -224,6 +224,8 @@ class CarlaHandler():
         self.client.apply_batch(destroy_commands)
 
     def spawn_vehicle(self, model):
+
+        self.current_model = model
         
         vehicle_bp = self.blueprint_library.find(model)
         vehicle_bp.set_attribute('color', '255, 0, 0')  # Red
@@ -251,7 +253,7 @@ class CarlaHandler():
         """
         if self.vehicle is not None:
             self.vehicle.destroy()
-            vehicle_bp = self.blueprint_library.find('vehicle.tesla.model3')
+            vehicle_bp = self.blueprint_library.find(self.current_model)
             chosen_color = str(color[0]) + ', ' + str(color[1]) + ', ' + str(color[2]) # Convert to string
             vehicle_bp.set_attribute('color', str(chosen_color))
             self.vehicle = self.world.spawn_actor(vehicle_bp, self.spawn_point)
